@@ -242,7 +242,13 @@ export async function pushSyncKernelToKaggle() {
                 const fileName = f.fileName || f.name || '';
                 const fileUrl = f.url;
                 if (!fileName || !fileUrl) continue;
-                if (!/(model\.json|class\.json|training_summary\.json|\.bin$|comparison_table\.csv|metrics\.csv)/i.test(fileName)) continue;
+                if (
+                  !/(model\.json|class\.json|training_summary\.json|\.bin$|comparison_table\.csv|metrics\.csv|classification_report\.csv|error_summary\.csv|misclassified\.csv|history\.csv|dataset_split\.csv|confusion_matrix\.png|training_history\.png)$/i.test(
+                    fileName
+                  )
+                ) {
+                  continue;
+                }
                 const safeRoot = path.resolve(targetDir);
                 const destPath = path.resolve(safeRoot, String(fileName).replace(/^[/\\]+/, ''));
                 if (!destPath.startsWith(safeRoot + path.sep)) continue;

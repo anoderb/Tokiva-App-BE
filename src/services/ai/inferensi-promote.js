@@ -2,6 +2,29 @@ import { supabaseAdmin } from '../../lib/supabase.js';
 import { BadRequest } from '../../utils/errors.js';
 import { recountKelasMetrics } from './helpers.js';
 
+async function resolveAiKelasIdForProduk(produkRow) {
+  if (!produkRow) return null;
+  if (produkRow.master_id) {
+    const { data: byMaster } = await supabaseAdmin
+      .from('ai_kelas')
+      .select('id')
+      .eq('master_id', produkRow.master_id)
+      .limit(1)
+      .maybeSingle();
+    if (byMaster?.id) return byMaster.id;
+  }
+  if (produkRow.barcode) {
+    const { data: byBarcode } = await supabaseAdmin
+      .from('ai_kelas')
+      .select('id')
+      .eq('barcode', produkRow.barcode)
+      .limit(1)
+      .maybeSingle();
+    if (byBarcode?.id) return byBarcode.id;
+  }
+  return null;
+}
+
 /**
  * Konversi Log Inferensi Kasir menjadi Sampel Latih AI (Langsung Terverifikasi oleh Admin)
  */
@@ -11,7 +34,7 @@ export async function jadikanDataLatihDariLog(
 ) {
   const { data: logRow, error: lErr } = await supabaseAdmin
     .from('ai_log_inferensi')
-    .select('*, kelas:prediksi_kelas_id(id, kode_kelas, nama), produk_asli:produk_id_asli(id, ai_kelas_id)')
+    .select('*, kelas:prediksi_kelas_id(id, kode_kelas, nama), produk_asli:produk_id_asli(id, master_id, barcode)')
     .eq('id', logId)
     .maybeSingle();
 
@@ -25,13 +48,18 @@ export async function jadikanDataLatihDariLog(
     if (kCheck?.id) {
       targetKelasId = kCheck.id;
     } else {
-      const { data: pCheck } = await supabaseAdmin.from('produk').select('ai_kelas_id').eq('id', kelas_id).maybeSingle();
-      targetKelasId = pCheck?.ai_kelas_id || null;
+      const { data: pCheck } = await supabaseAdmin
+        .from('produk')
+        .select('id, master_id, barcode')
+        .eq('id', kelas_id)
+        .maybeSingle();
+      targetKelasId = await resolveAiKelasIdForProduk(pCheck);
     }
   }
 
   if (!targetKelasId) {
-    targetKelasId = logRow.produk_asli?.ai_kelas_id || logRow.prediksi_kelas_id || null;
+    targetKelasId =
+      (await resolveAiKelasIdForProduk(logRow.produk_asli)) || logRow.prediksi_kelas_id || null;
   }
   if (!targetKelasId) {
     throw new BadRequest('Kelas AI tujuan tidak ditemukan atau belum dipetakan pada produk terkait');

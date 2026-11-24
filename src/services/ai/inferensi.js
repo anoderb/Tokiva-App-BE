@@ -80,8 +80,10 @@ export async function catatLogInferensi(tokoId, kasirId, payload) {
  * Daftar Riwayat Log Inferensi Visual di Kasir
  */
 export async function listLogInferensi(tokoId, { butuh_koreksi, versi_model, limit = 50, page = 1 } = {}) {
-  const from = (page - 1) * limit;
-  const to = from + limit - 1;
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
+  const from = (safePage - 1) * safeLimit;
+  const to = from + safeLimit - 1;
 
   let query = supabaseAdmin
     .from('ai_log_inferensi')
@@ -89,7 +91,7 @@ export async function listLogInferensi(tokoId, { butuh_koreksi, versi_model, lim
       `
       *,
       kelas:prediksi_kelas_id(id, kode_kelas, nama),
-      produk_asli:produk_id_asli(id, nama, barcode, ai_kelas_id),
+      produk_asli:produk_id_asli(id, nama, barcode, master_id),
       kasir:kasir_id(id, nama_lengkap)
     `,
       { count: 'exact' }
@@ -103,6 +105,28 @@ export async function listLogInferensi(tokoId, { butuh_koreksi, versi_model, lim
 
   const { data, count, error } = await query.order('waktu', { ascending: false }).range(from, to);
   if (error) throw error;
+
+  const masterIds = [...new Set((data || []).map((r) => r.produk_asli?.master_id).filter(Boolean))];
+  const barcodes = [...new Set((data || []).map((r) => r.produk_asli?.barcode).filter(Boolean))];
+  const masterToKelasId = new Map();
+  const barcodeToKelasId = new Map();
+
+  if (masterIds.length > 0 || barcodes.length > 0) {
+    const [byMasterRes, byBarcodeRes] = await Promise.all([
+      masterIds.length > 0
+        ? supabaseAdmin.from('ai_kelas').select('id, master_id').in('master_id', masterIds)
+        : { data: [] },
+      barcodes.length > 0
+        ? supabaseAdmin.from('ai_kelas').select('id, barcode').in('barcode', barcodes)
+        : { data: [] },
+    ]);
+    for (const k of byMasterRes.data || []) {
+      if (k.master_id && !masterToKelasId.has(k.master_id)) masterToKelasId.set(k.master_id, k.id);
+    }
+    for (const k of byBarcodeRes.data || []) {
+      if (k.barcode && !barcodeToKelasId.has(k.barcode)) barcodeToKelasId.set(k.barcode, k.id);
+    }
+  }
 
   const rawPaths = [
     ...new Set((data || []).map((r) => r.foto_cuplikan).filter((p) => typeof p === 'string' && p.length > 0 && !p.startsWith('data:'))),
@@ -121,8 +145,18 @@ export async function listLogInferensi(tokoId, { butuh_koreksi, versi_model, lim
         const { data: signData } = await supabaseAdmin.storage.from('dataset-raw-temp').createSignedUrl(fotoUrl, 3600);
         fotoUrl = signData?.signedUrl || fotoUrl;
       }
+      const produkAsli = row.produk_asli
+        ? {
+            ...row.produk_asli,
+            ai_kelas_id:
+              (row.produk_asli.master_id && masterToKelasId.get(row.produk_asli.master_id)) ||
+              (row.produk_asli.barcode && barcodeToKelasId.get(row.produk_asli.barcode)) ||
+              null,
+          }
+        : null;
       return {
         ...row,
+        produk_asli: produkAsli,
         foto_cuplikan: fotoUrl,
         raw_foto_path: rawPath,
         sudah_jadi_sampel: Boolean(rawPath && promotedPaths.has(rawPath)),
@@ -133,11 +167,11 @@ export async function listLogInferensi(tokoId, { butuh_koreksi, versi_model, lim
   );
 
   const total = count || 0;
-  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const totalPages = Math.max(1, Math.ceil(total / safeLimit));
   return {
     items,
-    pagination: { total, page: Number(page), limit: Number(limit), total_pages: totalPages },
-    meta: { total, page: Number(page), limit: Number(limit), totalPages },
+    pagination: { total, page: safePage, limit: safeLimit, total_pages: totalPages },
+    meta: { total, page: safePage, limit: safeLimit, totalPages },
   };
 }
 
