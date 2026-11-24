@@ -68,8 +68,17 @@ function isTrustedHuggingFaceHost(hostname) {
   return host === 'huggingface.co' || host.endsWith('.huggingface.co');
 }
 
-function createMediaSignature(resourceKey, exp) {
+export function createMediaSignature(resourceKey, exp) {
   return crypto.createHmac('sha256', config.jwt.secret).update(`${resourceKey}:${exp}`).digest('hex');
+}
+
+/** Membuat path proxy Hugging Face bertanda tangan HMAC berjangka waktu untuk tag <img> lintas domain. */
+export function buildSignedHfProxyPath(hfPath, ttlSeconds = 3600) {
+  if (!hfPath) return null;
+  const clean = String(hfPath);
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const sig = createMediaSignature(clean, exp);
+  return `/api/media/hf-proxy?path=${encodeURIComponent(clean)}&exp=${exp}&sig=${sig}`;
 }
 
 /** Verifikasi tanda tangan HMAC berjangka waktu untuk URL akses media terautentikasi. */
@@ -86,6 +95,16 @@ export function verifyMediaSignature(resourceKey, exp, sig) {
 export async function authenticateMediaRequest(req, reply) {
   const key = req.query?.url || req.query?.path || '';
   if (key && verifyMediaSignature(String(key), req.query?.exp, req.query?.sig)) return;
+  return authenticate(req, reply);
+}
+
+/** Autentikasi plot riset melalui signature HMAC berjangka waktu atau JWT Bearer / Cookie sesi. */
+export async function authenticateResearchPlotRequest(req, reply) {
+  const expName = req.query?.exp_name || (req.query?.exp === 'E2_MobileNetV3_CBAM' ? 'E2_MobileNetV3_CBAM' : 'E1_MobileNetV3');
+  const type = req.query?.type === 'training_history' ? 'training_history' : 'confusion_matrix';
+  const runId = String(req.query?.run_id || 'default');
+  const key = `research-plot:${expName}:${type}:${runId}`;
+  if (verifyMediaSignature(key, req.query?.sig_exp || req.query?.exp, req.query?.sig)) return;
   return authenticate(req, reply);
 }
 

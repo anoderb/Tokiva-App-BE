@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { NotFound, BadRequest } from '../../utils/errors.js';
 import { sanitizeSearchTerm } from '../../utils/postgrest.js';
+import { buildSignedHfProxyPath } from '../../routes/public/media-proxy-guard.js';
 
 /**
  * Daftar Kelas Produk AI (Dilengkapi Thumbnail Asli dari produk_master / ai_sampel)
@@ -43,7 +44,7 @@ export async function listKelasAI({ search, status, kategori, limit = 100, page 
           .limit(1);
         const s = sRows?.[0];
         if (s?.hf_path) {
-          sampleCoverMap[kid] = `/api/media/hf-proxy?path=${encodeURIComponent(s.hf_path)}`;
+          sampleCoverMap[kid] = buildSignedHfProxyPath(s.hf_path);
         }
       })
     );
@@ -90,7 +91,7 @@ export async function getDetailKelasAI(id) {
       let fotoUrl = row.foto_url || null;
       if (!fotoUrl) {
         if (row.lokasi_simpan === 'huggingface' && row.hf_path) {
-          fotoUrl = `/api/media/hf-proxy?path=${encodeURIComponent(row.hf_path)}`;
+          fotoUrl = buildSignedHfProxyPath(row.hf_path);
         } else if (row.path_supabase) {
           const { data: signed } = await supabaseAdmin.storage
             .from('dataset-raw-temp')

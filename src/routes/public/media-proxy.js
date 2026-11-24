@@ -8,12 +8,19 @@ import { BadRequest, Forbidden, NotFound } from '../../utils/errors.js';
 import {
   assertSafeHttpsUrl,
   authenticateMediaRequest,
+  authenticateResearchPlotRequest,
+  buildSignedHfProxyPath,
   fetchUrlBuffer,
   isPrivateOrLoopbackIp,
   verifyMediaSignature,
 } from './media-proxy-guard.js';
 
-export { isPrivateOrLoopbackIp, assertSafeHttpsUrl, verifyMediaSignature };
+export {
+  isPrivateOrLoopbackIp,
+  assertSafeHttpsUrl,
+  verifyMediaSignature,
+  buildSignedHfProxyPath,
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,6 +45,8 @@ const researchPlotSchema = {
       exp: { type: 'string', enum: ['E1_MobileNetV3', 'E2_MobileNetV3_CBAM'] },
       type: { type: 'string', enum: ['confusion_matrix', 'training_history'] },
       run_id: { type: 'string', pattern: '^[a-zA-Z0-9._-]+$' },
+      sig_exp: { type: 'string', maxLength: 32 },
+      sig: { type: 'string', maxLength: 128 },
     },
   },
 };
@@ -73,7 +82,12 @@ export default async function mediaProxyRoutes(app) {
         }
         targetUrl = parsedRaw.href;
       } else if (rawPath) {
-        const decodedPath = decodeURIComponent(rawPath);
+        let decodedPath;
+        try {
+          decodedPath = decodeURIComponent(rawPath);
+        } catch {
+          throw new BadRequest('Path dataset tidak valid');
+        }
         if (decodedPath.includes('..') || decodedPath.includes('\\') || decodedPath.startsWith('http') || decodedPath.includes('\0')) {
           throw new BadRequest('Path dataset tidak valid');
         }
@@ -105,13 +119,17 @@ export default async function mediaProxyRoutes(app) {
         });
       }
 
-      return reply.header('Content-Type', upstream.contentType).header('Cache-Control', 'private, max-age=3600').send(upstream.buffer);
+      return reply
+        .header('Content-Type', upstream.contentType)
+        .header('Cache-Control', 'private, max-age=3600')
+        .header('Cross-Origin-Resource-Policy', 'cross-origin')
+        .send(upstream.buffer);
     }
   );
 
   app.get(
     '/media/research-plot',
-    { schema: researchPlotSchema, preHandler: [authenticate] },
+    { schema: researchPlotSchema, preHandler: [authenticateResearchPlotRequest] },
     async (req, reply) => {
       const exp = req.query?.exp === 'E2_MobileNetV3_CBAM' ? 'E2_MobileNetV3_CBAM' : 'E1_MobileNetV3';
       const type = req.query?.type === 'training_history' ? 'training_history' : 'confusion_matrix';
@@ -128,7 +146,11 @@ export default async function mediaProxyRoutes(app) {
         throw new NotFound('File plot riset tidak ditemukan');
       }
 
-      return reply.header('Content-Type', 'image/png').header('Cache-Control', 'private, max-age=300').send(fs.readFileSync(fullPath));
+      return reply
+        .header('Content-Type', 'image/png')
+        .header('Cache-Control', 'private, max-age=300')
+        .header('Cross-Origin-Resource-Policy', 'cross-origin')
+        .send(fs.readFileSync(fullPath));
     }
   );
 }

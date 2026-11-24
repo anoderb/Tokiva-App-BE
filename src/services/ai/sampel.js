@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { NotFound, BadRequest } from '../../utils/errors.js';
+import { buildSignedHfProxyPath } from '../../routes/public/media-proxy-guard.js';
 import {
   buildHfSamplePath,
   isProtectedStagingPath,
@@ -70,7 +71,7 @@ export async function listSampel({ kelas_id, terverifikasi, status, sumber, loka
       let fotoUrl = row.foto_url || null;
       if (!fotoUrl) {
         if (row.lokasi_simpan === 'huggingface' && row.hf_path) {
-          fotoUrl = `/api/media/hf-proxy?path=${encodeURIComponent(row.hf_path)}`;
+          fotoUrl = buildSignedHfProxyPath(row.hf_path);
         } else if (row.path_supabase) {
           const { data: signed } = await supabaseAdmin.storage
             .from('dataset-raw-temp')

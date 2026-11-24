@@ -1,5 +1,18 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
-dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+
+function parseTrustProxy(rawValue, isProd) {
+  if (rawValue === undefined || rawValue === '') return isProd;
+  if (rawValue === 'true') return true;
+  if (rawValue === 'false') return false;
+  const asNum = Number(rawValue);
+  return Number.isFinite(asNum) && asNum >= 0 ? asNum : isProd;
+}
 
 const requiredEnvVars = [
   'SUPABASE_URL',
@@ -19,6 +32,11 @@ export const config = {
   host: process.env.HOST || '0.0.0.0',
   nodeEnv: process.env.NODE_ENV || 'development',
   isDev: process.env.NODE_ENV !== 'production',
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY, process.env.NODE_ENV === 'production'),
+
+  cookie: {
+    domain: (process.env.COOKIE_DOMAIN || '').trim() || undefined,
+  },
   
   supabase: {
     url: process.env.SUPABASE_URL,

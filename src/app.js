@@ -59,6 +59,7 @@ export function isOriginAllowed(origin, allowedOrigins, isDev = config.isDev) {
 
 export async function buildApp() {
   const app = Fastify({
+    trustProxy: config.trustProxy,
     bodyLimit: 25 * 1024 * 1024, // 25 MiB untuk upload multi-foto dataset burst
     logger: {
       level: config.isDev ? 'info' : 'warn',
@@ -112,7 +113,9 @@ export async function buildApp() {
     reply.header('X-Frame-Options', 'DENY');
     reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
     reply.header('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
-    reply.header('Cross-Origin-Resource-Policy', 'same-site');
+    if (!reply.getHeader('Cross-Origin-Resource-Policy')) {
+      reply.header('Cross-Origin-Resource-Policy', 'same-site');
+    }
   });
 
   // 2. Cookie & JWT

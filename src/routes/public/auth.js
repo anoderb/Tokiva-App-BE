@@ -14,15 +14,20 @@ import {
   extractSessionToken,
   invalidateAuthCache,
 } from '../../plugins/auth.js';
+import { config } from '../../config/env.js';
 import { ok } from '../../utils/response.js';
 
 const COOKIE_NAME = 'tokiva_token';
 const isProd = process.env.NODE_ENV === 'production';
-const cookieOptions = {
+const baseCookieOptions = {
   httpOnly: true,
   secure: isProd,
   sameSite: 'lax',
   path: '/',
+  ...(config.cookie?.domain ? { domain: config.cookie.domain } : {}),
+};
+const cookieOptions = {
+  ...baseCookieOptions,
   maxAge: 7 * 24 * 60 * 60,
 };
 
@@ -136,7 +141,7 @@ export default async function authRoutes(app) {
     if (token) {
       invalidateAuthCache(token);
     }
-    reply.clearCookie(COOKIE_NAME, { path: '/' });
+    reply.clearCookie(COOKIE_NAME, baseCookieOptions);
     return ok(reply, null, 'Logout berhasil, sesi telah dihapus');
   });
 }
