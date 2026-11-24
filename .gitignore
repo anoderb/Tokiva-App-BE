@@ -1,0 +1,22 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+dist/
+coverage/
+
+# Kaggle runtime outputs, push staging & mutable state files
+kaggle/kernel-output/
+kaggle/kernel-push/
+kaggle/sync-kernel-output/
+kaggle/sync-kernel-push/
+kaggle/training-state.json
+kaggle/dataset-sync-state.json
+kaggle/automation-config.json
+kaggle/threshold-config.json
+kaggle/.kaggle/
+__pycache__/
+*.pyc
