@@ -10,6 +10,7 @@ if (typeof net.setDefaultAutoSelectFamily === 'function') {
 
 import { buildApp } from './app.js';
 import { config } from './config/env.js';
+import { initKaggleStatesFromCloud } from './services/ai/kaggle-config.js';
 import { initAiAutomationScheduler } from './services/ai/scheduler.js';
 
 async function startServer() {
@@ -21,6 +22,9 @@ async function startServer() {
       host: config.host,
     });
 
+    await initKaggleStatesFromCloud().catch((err) => {
+      app.log.warn({ err }, 'Gagal inisialisasi state Kaggle dari cloud storage');
+    });
     await initAiAutomationScheduler().catch((err) => {
       app.log.warn({ err }, 'Gagal inisialisasi AI Automation Scheduler');
     });

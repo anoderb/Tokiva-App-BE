@@ -1,21 +1,31 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../../config/env.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const KAGGLE_ROOT = path.join(__dirname, '../../../kaggle');
 export const NOTEBOOK_PATH = path.join(KAGGLE_ROOT, 'model-training-fix-mobilenet-cbam.ipynb');
-export const KERNEL_PUSH_DIR = path.join(KAGGLE_ROOT, 'kernel-push');
-export const KERNEL_OUTPUT_DIR = path.join(KAGGLE_ROOT, 'kernel-output');
-export const STATE_FILE = path.join(KAGGLE_ROOT, 'training-state.json');
-
 export const SYNC_NOTEBOOK_PATH = path.join(KAGGLE_ROOT, 'sync-hf-to-kaggle-dataset.ipynb');
-export const SYNC_PUSH_DIR = path.join(KAGGLE_ROOT, 'sync-kernel-push');
-export const SYNC_OUTPUT_DIR = path.join(KAGGLE_ROOT, 'sync-kernel-output');
-export const SYNC_STATE_FILE = path.join(KAGGLE_ROOT, 'dataset-sync-state.json');
+export const LEGACY_KERNEL_OUTPUT_DIR = path.join(KAGGLE_ROOT, 'kernel-output');
+
+export const KAGGLE_TEMP_ROOT = process.env.KAGGLE_WORK_DIR
+  ? path.resolve(process.env.KAGGLE_WORK_DIR)
+  : path.join(os.tmpdir(), 'tokiva-kaggle');
+export const KERNEL_PUSH_DIR = path.join(KAGGLE_TEMP_ROOT, 'kernel-push');
+export const KERNEL_OUTPUT_DIR = path.join(KAGGLE_TEMP_ROOT, 'kernel-output');
+export const STATE_FILE = path.join(KAGGLE_TEMP_ROOT, 'training-state.json');
+
+export const SYNC_PUSH_DIR = path.join(KAGGLE_TEMP_ROOT, 'sync-kernel-push');
+export const SYNC_OUTPUT_DIR = path.join(KAGGLE_TEMP_ROOT, 'sync-kernel-output');
+export const SYNC_STATE_FILE = path.join(KAGGLE_TEMP_ROOT, 'dataset-sync-state.json');
+
+const LEGACY_STATE_FILE = path.join(KAGGLE_ROOT, 'training-state.json');
+const LEGACY_SYNC_STATE_FILE = path.join(KAGGLE_ROOT, 'dataset-sync-state.json');
 
 const KAGGLE_OWNER = config.kaggle.username || '';
 const qualifyKaggleSlug = (slug) => (KAGGLE_OWNER ? `${KAGGLE_OWNER}/${slug}` : '');
@@ -33,6 +43,8 @@ export const DATASET_ID = qualifyKaggleSlug(DATASET_SLUG);
 export const DATASET_KAGGLE_URL = DATASET_ID ? `https://www.kaggle.com/datasets/${DATASET_ID}` : '';
 
 export const STORAGE_BUCKET = 'ai-models';
+const CLOUD_TRAINING_STATE_PATH = 'config/training-state.json';
+const CLOUD_SYNC_STATE_PATH = 'config/dataset-sync-state.json';
 
 export const EXPERIMENT_NAME_MAP = {
   E1_MobileNetV3: 'Tokiva E1_MobileNetV3',
@@ -41,19 +53,48 @@ export const EXPERIMENT_NAME_MAP = {
   E2_MobileNetV2_CBAM: 'Tokiva E2_MobileNetV2_CBAM',
 };
 
-for (const dir of [KAGGLE_ROOT, KERNEL_PUSH_DIR, KERNEL_OUTPUT_DIR, SYNC_PUSH_DIR, SYNC_OUTPUT_DIR]) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+let trainingStateCache = null;
+let syncStateCache = null;
+
+function cloneState(obj) {
+  return JSON.parse(JSON.stringify(obj || { current: null, history: [] }));
 }
 
-export function readJsonState(filePath) {
+export function ensureDir(dirPath) {
+  if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+}
+
+/** Menghapus direktori sementara hanya jika berada aman di dalam KAGGLE_TEMP_ROOT. */
+export function cleanupTempDir(dirPath) {
+  if (!dirPath) return false;
+  const resolvedRoot = path.resolve(KAGGLE_TEMP_ROOT);
+  const resolvedTarget = path.resolve(dirPath);
+  if (resolvedTarget === resolvedRoot || !resolvedTarget.startsWith(resolvedRoot + path.sep)) {
+    return false;
+  }
   try {
-    if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-  } catch {}
+    if (fs.existsSync(resolvedTarget)) {
+      fs.rmSync(resolvedTarget, { recursive: true, force: true });
+      return true;
+    }
+  } catch (err) {
+    console.warn(`Gagal membersihkan direktori sementara ${resolvedTarget}:`, err.message);
+  }
+  return false;
+}
+
+export function readJsonState(filePath, fallbackPath = null) {
+  for (const candidate of [filePath, fallbackPath].filter(Boolean)) {
+    try {
+      if (fs.existsSync(candidate)) return JSON.parse(fs.readFileSync(candidate, 'utf-8'));
+    } catch {}
+  }
   return { current: null, history: [] };
 }
 
 export function writeJsonState(filePath, state) {
   try {
+    ensureDir(path.dirname(filePath));
     const tmpPath = `${filePath}.tmp`;
     fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf-8');
     fs.renameSync(tmpPath, filePath);
@@ -62,10 +103,67 @@ export function writeJsonState(filePath, state) {
   }
 }
 
-export const readTrainingState = () => readJsonState(STATE_FILE);
-export const writeTrainingState = (state) => writeJsonState(STATE_FILE, state);
-export const readSyncState = () => readJsonState(SYNC_STATE_FILE);
-export const writeSyncState = (state) => writeJsonState(SYNC_STATE_FILE, state);
+async function fetchCloudState(cloudPath, storageClient = supabaseAdmin.storage) {
+  try {
+    const { data, error } = await storageClient.from(STORAGE_BUCKET).download(cloudPath);
+    if (!error && data) {
+      const text = await data.text();
+      if (text.trim()) return JSON.parse(text);
+    }
+  } catch {}
+  return null;
+}
+
+function syncCloudStateAsync(cloudPath, state, storageClient = supabaseAdmin.storage) {
+  Promise.resolve(
+    storageClient
+      .from(STORAGE_BUCKET)
+      .upload(cloudPath, Buffer.from(JSON.stringify(state, null, 2), 'utf-8'), {
+        contentType: 'application/json',
+        cacheControl: '0',
+        upsert: true,
+      })
+  ).catch((err) => {
+    console.warn(`Gagal sinkronisasi ${cloudPath} ke Supabase Storage:`, err?.message || err);
+  });
+}
+
+/** Muat status training & sync dataset Kaggle dari Supabase Storage saat startup server. */
+export async function initKaggleStatesFromCloud(storageClient = supabaseAdmin.storage) {
+  const [cloudTrain, cloudSync] = await Promise.all([
+    fetchCloudState(CLOUD_TRAINING_STATE_PATH, storageClient),
+    fetchCloudState(CLOUD_SYNC_STATE_PATH, storageClient),
+  ]);
+  trainingStateCache = cloudTrain || readJsonState(STATE_FILE, LEGACY_STATE_FILE);
+  syncStateCache = cloudSync || readJsonState(SYNC_STATE_FILE, LEGACY_SYNC_STATE_FILE);
+  return { training: cloneState(trainingStateCache), sync: cloneState(syncStateCache) };
+}
+
+export function readTrainingState() {
+  if (trainingStateCache) return cloneState(trainingStateCache);
+  trainingStateCache = readJsonState(STATE_FILE, LEGACY_STATE_FILE);
+  return cloneState(trainingStateCache);
+}
+
+export function writeTrainingState(state) {
+  const snapshot = cloneState(state);
+  trainingStateCache = snapshot;
+  writeJsonState(STATE_FILE, snapshot);
+  syncCloudStateAsync(CLOUD_TRAINING_STATE_PATH, snapshot);
+}
+
+export function readSyncState() {
+  if (syncStateCache) return cloneState(syncStateCache);
+  syncStateCache = readJsonState(SYNC_STATE_FILE, LEGACY_SYNC_STATE_FILE);
+  return cloneState(syncStateCache);
+}
+
+export function writeSyncState(state) {
+  const snapshot = cloneState(state);
+  syncStateCache = snapshot;
+  writeJsonState(SYNC_STATE_FILE, snapshot);
+  syncCloudStateAsync(CLOUD_SYNC_STATE_PATH, snapshot);
+}
 
 export function getKaggleBasicAuth() {
   const { username, key } = config.kaggle;

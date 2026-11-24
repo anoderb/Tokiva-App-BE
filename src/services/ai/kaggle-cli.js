@@ -18,6 +18,8 @@ import {
   SYNC_KAGGLE_URL,
   DATASET_SLUG,
   DATASET_ID,
+  ensureDir,
+  cleanupTempDir,
   getKaggleBasicAuth,
   findArtifact,
   normalizeKaggleUrl,
@@ -49,6 +51,7 @@ function injectNotebookNonSecretConfig(notebookPath, replacements = {}) {
 }
 
   function prepareNotebookWorkspace({ srcNotebook, pushDir, fileName, kernelId, kernelSlug, enableGpu, attachDataset }) {
+    ensureDir(pushDir);
     const nbDest = path.join(pushDir, fileName);
     fs.copyFileSync(srcNotebook, nbDest);
     try {
@@ -91,42 +94,46 @@ function injectNotebookNonSecretConfig(notebookPath, replacements = {}) {
     }) {
       const authHeader = `Basic ${getKaggleBasicAuth()}`;
       try {
-        const res = await fetch('https://www.kaggle.com/api/v1/kernels/push', {
-          method: 'POST',
-          headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            slug: kernelId,
-            newTitle: kernelSlug,
-            text: notebookText,
-            language: 'python',
-            kernelType: 'notebook',
-            isPrivate: true,
-            enableGpu: Boolean(enableGpu),
-            enableTpu: false,
-            enableInternet: true,
-            datasetDataSources: attachDataset ? [DATASET_ID] : [],
-            competitionDataSources: [],
-            kernelDataSources: [],
-          }),
-        });
-        if (res.ok) {
-          const json = await res.json();
-          return {
-            stdout: formatRestStdout(json),
-            url: normalizeKaggleUrl(json.url, defaultUrl),
-          };
+        try {
+          const res = await fetch('https://www.kaggle.com/api/v1/kernels/push', {
+            method: 'POST',
+            headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              slug: kernelId,
+              newTitle: kernelSlug,
+              text: notebookText,
+              language: 'python',
+              kernelType: 'notebook',
+              isPrivate: true,
+              enableGpu: Boolean(enableGpu),
+              enableTpu: false,
+              enableInternet: true,
+              datasetDataSources: attachDataset ? [DATASET_ID] : [],
+              competitionDataSources: [],
+              kernelDataSources: [],
+            }),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            return {
+              stdout: formatRestStdout(json),
+              url: normalizeKaggleUrl(json.url, defaultUrl),
+            };
+          }
+        } catch (apiErr) {
+          console.warn(`Kaggle REST push fallback ke CLI (${kernelSlug}):`, apiErr.message);
         }
-      } catch (apiErr) {
-        console.warn(`Kaggle REST push fallback ke CLI (${kernelSlug}):`, apiErr.message);
-      }
 
-      const env = { ...process.env, KAGGLE_USERNAME: config.kaggle.username, KAGGLE_KEY: config.kaggle.key };
+        const env = { ...process.env, KAGGLE_USERNAME: config.kaggle.username, KAGGLE_KEY: config.kaggle.key };
         const { stdout } = await execFileAsync('python', ['-m', 'kaggle', 'kernels', 'push', '-p', pushDir], {
           env,
           maxBuffer: 10 * 1024 * 1024,
         });
         return { stdout, url: defaultUrl };
+      } finally {
+        cleanupTempDir(pushDir);
       }
+    }
 
         export async function checkKaggleDatasetExists() {
           try {
@@ -221,13 +228,14 @@ export async function pushSyncKernelToKaggle() {
         }
 
         export async function downloadKernelOutputIfNeeded(runId = null, forceRemote = false) {
-          const targetDir = runId ? path.join(KERNEL_OUTPUT_DIR, runId) : KERNEL_OUTPUT_DIR;
+          const stagedId = runId || `fetch-${Date.now()}`;
+          const targetDir = path.join(KERNEL_OUTPUT_DIR, stagedId);
           if (!forceRemote && !runId) {
             const existingLocal = findArtifact(KERNEL_OUTPUT_DIR, 'model.json', 'FINAL_MODEL');
             if (existingLocal) return { modelJsonLocal: existingLocal, searchRoot: KERNEL_OUTPUT_DIR };
           }
 
-          if (runId && fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+          if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
           fs.mkdirSync(targetDir, { recursive: true });
 
           const authHeader = `Basic ${getKaggleBasicAuth()}`;
@@ -264,9 +272,7 @@ export async function pushSyncKernelToKaggle() {
           return { modelJsonLocal: findArtifact(targetDir, 'model.json', 'FINAL_MODEL'), searchRoot: targetDir };
         }
 
-        export async function downloadSyncSummary(syncId = 'latest') {
-          const targetDir = path.join(SYNC_OUTPUT_DIR, syncId);
-          fs.mkdirSync(targetDir, { recursive: true });
+        export async function downloadSyncSummary(_syncId = 'latest') {
           const authHeader = `Basic ${getKaggleBasicAuth()}`;
           try {
             const url = `https://www.kaggle.com/api/v1/kernels/output?userName=${encodeURIComponent(
@@ -285,7 +291,6 @@ export async function pushSyncKernelToKaggle() {
             if (!dlRes.ok) return null;
 
             const text = await dlRes.text();
-            fs.writeFileSync(path.join(targetDir, 'sync_summary.json'), text, 'utf-8');
             return JSON.parse(text);
           } catch (err) {
             console.warn('Gagal mengunduh sync_summary.json dari Kaggle:', err.message);

@@ -142,15 +142,28 @@ export default async function mediaProxyRoutes(app) {
           : path.join('EXPERIMENT', exp, 'confusion_matrix', 'confusion_matrix.png');
 
       const fullPath = path.resolve(baseDir, relFile);
-      if (!fullPath.startsWith(baseDir + path.sep) || !fs.existsSync(fullPath)) {
-        throw new NotFound('File plot riset tidak ditemukan');
+      if (fullPath.startsWith(baseDir + path.sep) && fs.existsSync(fullPath)) {
+        return reply
+          .header('Content-Type', 'image/png')
+          .header('Cache-Control', 'private, max-age=300')
+          .header('Cross-Origin-Resource-Policy', 'cross-origin')
+          .send(fs.readFileSync(fullPath));
       }
 
-      return reply
-        .header('Content-Type', 'image/png')
-        .header('Cache-Control', 'private, max-age=300')
-        .header('Cross-Origin-Resource-Policy', 'cross-origin')
-        .send(fs.readFileSync(fullPath));
+      const cloudSummary = await kaggleService.getResearchSummary(req.query?.run_id || null);
+      const cloudPlotUrl = cloudSummary?.plot_urls?.[exp]?.[type];
+      if (cloudPlotUrl) {
+        const upstream = await fetchUrlBuffer(cloudPlotUrl);
+        if (upstream.status < 400) {
+          return reply
+            .header('Content-Type', upstream.contentType || 'image/png')
+            .header('Cache-Control', 'private, max-age=300')
+            .header('Cross-Origin-Resource-Policy', 'cross-origin')
+            .send(upstream.buffer);
+        }
+      }
+
+      throw new NotFound('File plot riset tidak ditemukan');
     }
   );
 }

@@ -139,10 +139,11 @@ export async function fetchAndRegisterKaggleOutput(customVersi = null) {
     throw new Error(`Kernel Kaggle saat ini berstatus error: ${remote.failureMessage || remote.raw}`);
   }
 
-  const result = await downloadAndRegister(customVersi, null);
+  const fetchRunId = `FETCH-${Date.now()}`;
+  const result = await downloadAndRegister(customVersi, fetchRunId);
   const state = readTrainingState();
   const run = {
-    training_id: `FETCH-${Date.now()}`,
+    training_id: fetchRunId,
     status: 'complete',
     kernel_id: KERNEL_ID,
     kaggle_url: KAGGLE_URL,
