@@ -89,7 +89,15 @@ export const aiAdminSchema = {
   createKelas: {
     tags: ['AI Dataset'],
     summary: 'Tambah kelas produk AI baru',
-    body: { type: 'object', additionalProperties: true, properties: { nama: { type: 'string' }, kode_kelas: { type: 'string' } } },
+    body: {
+      type: 'object',
+      additionalProperties: true,
+      properties: {
+        nama: { type: 'string' },
+        kode_kelas: { type: 'string' },
+        buat_produk_master: { type: 'boolean', default: false },
+      },
+    },
   },
   updateKelas: {
     tags: ['AI Dataset'],

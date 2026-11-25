@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { BadRequest, Conflict, NotFound } from '../../utils/errors.js';
+import { slugifyKodeKelas } from '../ai/helpers.js';
 
 function sanitizeSearchTerm(str) {
   return String(str || '')
@@ -74,6 +75,78 @@ export async function listProdukMaster({ search, merek, kategori_id, terverifika
   };
 }
 
+async function syncMasterToAiKelas(masterRow, cleanBarcode) {
+  let matched = null;
+  if (cleanBarcode) {
+    const { data: byBarcode } = await supabaseAdmin
+      .from('ai_kelas')
+      .select('*')
+      .eq('barcode', cleanBarcode)
+      .maybeSingle();
+    matched = byBarcode;
+  }
+
+  const baseKode = slugifyKodeKelas(masterRow.nama).slice(0, 50) || `produk-${Date.now()}`;
+  if (!matched) {
+    const { data: byKode } = await supabaseAdmin
+      .from('ai_kelas')
+      .select('*')
+      .eq('kode_kelas', baseKode)
+      .maybeSingle();
+    if (byKode && (!cleanBarcode || !byKode.barcode || byKode.barcode === cleanBarcode)) {
+      matched = byKode;
+    }
+  }
+
+  if (matched) {
+    const needsMaster = !matched.master_id;
+    const needsBarcode = Boolean(cleanBarcode && !matched.barcode);
+    if (needsMaster || needsBarcode) {
+      const { data: updated, error: updErr } = await supabaseAdmin
+        .from('ai_kelas')
+        .update({
+          master_id: matched.master_id || masterRow.id,
+          barcode: matched.barcode || cleanBarcode,
+          diubah_pada: new Date().toISOString(),
+        })
+        .eq('id', matched.id)
+        .select()
+        .single();
+      if (updErr) throw updErr;
+      return { ai_kelas: updated, ai_kelas_status: 'linked' };
+    }
+    return { ai_kelas: matched, ai_kelas_status: 'linked' };
+  }
+
+  const { data: slugTaken } = await supabaseAdmin
+    .from('ai_kelas')
+    .select('id')
+    .eq('kode_kelas', baseKode)
+    .maybeSingle();
+  const kodeKelas = slugTaken ? `${baseKode}-${Date.now().toString().slice(-4)}` : baseKode;
+
+  const { data: created, error: insErr } = await supabaseAdmin
+    .from('ai_kelas')
+    .insert({
+      kode_kelas: kodeKelas,
+      nama: masterRow.nama,
+      kategori: masterRow.kategori?.nama || 'Kebutuhan Harian',
+      barcode: cleanBarcode,
+      master_id: masterRow.id,
+      target_foto: 200,
+      total_foto: 0,
+      jml_supabase: 0,
+      jml_hf: 0,
+      status: 'Kurang Data',
+      diubah_pada: new Date().toISOString(),
+    })
+    .select()
+    .single();
+
+  if (insErr) throw insErr;
+  return { ai_kelas: created, ai_kelas_status: 'created' };
+}
+
 /**
  * Tambah Produk Master Global Baru
  */
@@ -87,6 +160,7 @@ export async function createProdukMaster(payload) {
     harga_saran = null,
     foto_url = null,
     terverifikasi = true,
+    buat_kelas_ai = false,
   } = payload;
 
   if (!nama || !nama.trim()) {
@@ -122,6 +196,12 @@ export async function createProdukMaster(payload) {
     .single();
 
   if (error) throw error;
+
+  if (Boolean(buat_kelas_ai)) {
+    const synced = await syncMasterToAiKelas(data, cleanBarcode);
+    return { ...data, ...synced };
+  }
+
   return data;
 }
 

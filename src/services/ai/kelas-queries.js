@@ -110,18 +110,92 @@ export async function getDetailKelasAI(id) {
   };
 }
 
+async function resolveOrCreateMasterForKelas(cleanNama, cleanBarcode, kategori) {
+  let matched = null;
+  if (cleanBarcode) {
+    const { data: byBarcode } = await supabaseAdmin
+      .from('produk_master')
+      .select('id')
+      .eq('barcode', cleanBarcode)
+      .maybeSingle();
+    matched = byBarcode;
+  }
+
+  if (!matched) {
+    const { data: byNama } = await supabaseAdmin
+      .from('produk_master')
+      .select('id')
+      .ilike('nama', cleanNama)
+      .limit(1)
+      .maybeSingle();
+    matched = byNama;
+  }
+
+  if (matched) {
+    return { masterId: matched.id, produkMasterStatus: 'linked' };
+  }
+
+  let matchedKatId = null;
+  const cleanKategori = String(kategori || '').trim();
+  if (cleanKategori) {
+    const { data: katRow } = await supabaseAdmin
+      .from('kategori')
+      .select('id')
+      .is('toko_id', null)
+      .ilike('nama', cleanKategori)
+      .limit(1)
+      .maybeSingle();
+    if (katRow?.id) matchedKatId = katRow.id;
+  }
+
+  const { data: created, error: masterErr } = await supabaseAdmin
+    .from('produk_master')
+    .insert({
+      nama: cleanNama,
+      merek: null,
+      barcode: cleanBarcode,
+      kategori_id: matchedKatId,
+      satuan_dasar: 'pcs',
+      harga_saran: null,
+      foto_url: null,
+      terverifikasi: true,
+    })
+    .select('id')
+    .single();
+
+  if (masterErr) throw masterErr;
+  return { masterId: created.id, produkMasterStatus: 'created' };
+}
+
 /**
  * Tambah Kelas Produk AI Baru
  */
 export async function createKelasAI(payload = {}, slugify = (v) => String(v || '').toLowerCase()) {
-  const { nama, kode_kelas, kategori = 'Kebutuhan Harian', barcode = null, target_foto = 200, master_id = null } = payload;
+  const {
+    nama,
+    kode_kelas,
+    kategori = 'Kebutuhan Harian',
+    barcode = null,
+    target_foto = 200,
+    master_id = null,
+    buat_produk_master = false,
+  } = payload;
   if (!nama || !String(nama).trim()) throw new BadRequest('Nama kelas produk wajib diisi');
 
   const cleanNama = String(nama).trim();
+  const cleanBarcode = barcode ? String(barcode).trim() : null;
   const slug = kode_kelas ? slugify(kode_kelas) : slugify(cleanNama);
 
   const { data: existing } = await supabaseAdmin.from('ai_kelas').select('id').eq('kode_kelas', slug).maybeSingle();
   if (existing) throw new BadRequest(`Kelas dengan kode '${slug}' sudah terdaftar`);
+
+  let resolvedMasterId = master_id || null;
+  let produkMasterStatus = null;
+  if (Boolean(buat_produk_master) && !resolvedMasterId) {
+    const synced = await resolveOrCreateMasterForKelas(cleanNama, cleanBarcode, kategori);
+    resolvedMasterId = synced.masterId;
+    produkMasterStatus = synced.produkMasterStatus;
+  }
 
   const { data, error } = await supabaseAdmin
     .from('ai_kelas')
@@ -129,8 +203,8 @@ export async function createKelasAI(payload = {}, slugify = (v) => String(v || '
       kode_kelas: slug,
       nama: cleanNama,
       kategori: kategori || 'Kebutuhan Harian',
-      barcode: barcode ? String(barcode).trim() : null,
-      master_id: master_id || null,
+      barcode: cleanBarcode,
+      master_id: resolvedMasterId,
       target_foto: Number(target_foto) || 200,
       total_foto: 0,
       jml_supabase: 0,
@@ -142,5 +216,5 @@ export async function createKelasAI(payload = {}, slugify = (v) => String(v || '
     .single();
 
   if (error) throw error;
-  return data;
+  return produkMasterStatus ? { ...data, produk_master_status: produkMasterStatus } : data;
 }

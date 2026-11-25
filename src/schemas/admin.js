@@ -128,6 +128,7 @@ export const adminSchema = {
         harga_saran: { type: ['number', 'null'], minimum: 0 },
         foto_url: { type: ['string', 'null'] },
         terverifikasi: { type: 'boolean', default: true },
+        buat_kelas_ai: { type: 'boolean', default: false },
       },
     },
   },
