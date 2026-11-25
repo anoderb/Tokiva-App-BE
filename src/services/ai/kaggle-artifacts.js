@@ -46,7 +46,18 @@ export async function downloadAndRegister(customVersi = null, runId = null, trac
   const { modelJsonLocal, searchRoot } = await downloadKernelOutputIfNeeded(runId, Boolean(runId), trackCfg.track);
   try {
     if (!modelJsonLocal) {
-      return { model_registered: false, message: 'model.json tidak ditemukan di output Kaggle.' };
+      const convLogPath = findArtifact(searchRoot, 'conversion_log.txt', 'FINAL_MODEL');
+      let detail = '';
+      if (convLogPath && fs.existsSync(convLogPath)) {
+        const lines = fs
+          .readFileSync(convLogPath, 'utf-8')
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        const errLine = [...lines].reverse().find((l) => /error|exception|attributeerror/i.test(l)) || lines.at(-1);
+        if (errLine) detail = ` (${errLine.slice(0, 160)})`;
+      }
+      return { model_registered: false, message: `model.json tidak ditemukan di output Kaggle${detail}.` };
     }
 
     const artifactDir = path.dirname(modelJsonLocal);

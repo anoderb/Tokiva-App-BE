@@ -245,7 +245,7 @@ export async function downloadKernelOutputIfNeeded(runId = null, forceRemote = f
                 const fileUrl = f.url;
                 if (!fileName || !fileUrl) continue;
                 if (
-                  !/(model\.json|class\.json|class_centroids\.json|embedding_meta\.json|training_summary\.json|\.bin$|comparison_table\.csv|metrics\.csv|classification_report\.csv|error_summary\.csv|misclassified\.csv|history\.csv|dataset_split\.csv|confusion_matrix\.png|training_history\.png)$/i.test(
+                  !/(model\.json|class\.json|class_centroids\.json|embedding_meta\.json|conversion_log\.txt|training_summary\.json|\.bin$|comparison_table\.csv|metrics\.csv|classification_report\.csv|error_summary\.csv|misclassified\.csv|history\.csv|dataset_split\.csv|confusion_matrix\.png|training_history\.png)$/i.test(
                     fileName
                   )
                 ) {

@@ -151,21 +151,26 @@ const finalizationJobs = new Map();
             const fetchRunId = `FETCH-${trackCfg.track.toUpperCase()}-${Date.now()}`;
             const result = await downloadAndRegister(customVersi, fetchRunId, trackCfg.track);
             const state = readTrainingState(trackCfg.track);
+            const succeeded = Boolean(result?.model_registered);
             const run = {
               training_id: fetchRunId,
               track: trackCfg.track,
-              status: 'complete',
+              status: succeeded ? 'complete' : 'error',
               kernel_id: trackCfg.kernelId,
               kaggle_url: trackCfg.kaggleUrl,
               started_at: new Date().toISOString(),
               completed_at: new Date().toISOString(),
               result,
+              ...(succeeded ? {} : { error_message: result?.message || 'model.json tidak ditemukan di output Kaggle.' }),
               triggered_by: 'Super Admin (Instant Fetch)',
             };
             state.current = run;
             state.history = [run, ...(state.history || []).slice(0, 19)];
             writeTrainingState(state, trackCfg.track);
 
+            if (!succeeded) {
+              throw new Error(result?.message || 'model.json tidak ditemukan di output Kaggle.');
+            }
             return result;
           }
 
