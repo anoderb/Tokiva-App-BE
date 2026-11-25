@@ -18,6 +18,8 @@ function defaultThresholdConfig() {
     auto_add_high_confidence: true,
     show_top3_candidates: true,
     fallback_barcode_on_low: true,
+    enable_hybrid_embedding: true,
+    embedding_min_similarity: 78,
     updated_at: new Date().toISOString(),
   };
 }
@@ -70,12 +72,22 @@ export function updateThresholdConfig(payload = {}) {
     payload.medium_threshold !== undefined
       ? Math.min(high - 5, Math.max(5, Number(payload.medium_threshold)))
       : current.medium_threshold;
+  const embeddingMinSim =
+    payload.embedding_min_similarity !== undefined
+      ? Math.min(95, Math.max(50, Number(payload.embedding_min_similarity) || 78))
+      : current.embedding_min_similarity ?? 78;
+  const enableHybridEmbedding =
+    payload.enable_hybrid_embedding !== undefined
+      ? Boolean(payload.enable_hybrid_embedding)
+      : current.enable_hybrid_embedding ?? true;
 
   const updated = {
     ...current,
     ...payload,
     high_threshold: high,
     medium_threshold: medium,
+    enable_hybrid_embedding: enableHybridEmbedding,
+    embedding_min_similarity: embeddingMinSim,
     updated_at: new Date().toISOString(),
   };
   thresholdMemoryCache = updated;

@@ -63,6 +63,7 @@ export const config = {
     username: process.env.KAGGLE_USERNAME || '',
     key: process.env.KAGGLE_KEY || '',
     kernelSlug: process.env.KAGGLE_KERNEL_SLUG || 'tokiva-training-mobilenetv3-cbam',
+    kernelSlugV2: process.env.KAGGLE_KERNEL_SLUG_V2 || 'tokiva-training-mobilenetv3-cbam-v2',
     syncKernelSlug: process.env.KAGGLE_SYNC_KERNEL_SLUG || 'tokiva-sync-hf-dataset',
     datasetSlug: process.env.KAGGLE_DATASET_SLUG || 'tokiva-pos-dataset',
   },

@@ -6,6 +6,10 @@ import {
   listLogInferensi,
   getRingkasanAkurasi,
 } from '../../services/ai/inferensi.js';
+import {
+  enrollOwnerEmbedding,
+  listStoreActiveEmbeddings,
+} from '../../services/ai/embedding.js';
 import { aiSchema } from '../../schemas/ai.js';
 import { ok } from '../../utils/response.js';
 
@@ -55,5 +59,16 @@ export default async function ownerAiRoutes(app) {
   app.get('/ai/ringkasan-akurasi', { schema: aiSchema.ringkasanAkurasi }, async (req, reply) => {
     const data = await getRingkasanAkurasi(req.toko_id, req.query);
     return ok(reply, data);
+  });
+
+  // 5. Instant Cold-Start Visual Embedding (Khusus Model v2 & Terisolasi per Toko)
+  app.get('/ai/embeddings', { schema: aiSchema.listStoreEmbeddings }, async (req, reply) => {
+    const data = await listStoreActiveEmbeddings(req.toko_id, req.query?.model_versi || null);
+    return ok(reply, data);
+  });
+
+  app.post('/ai/embeddings/enroll', { schema: aiSchema.enrollEmbedding }, async (req, reply) => {
+    const data = await enrollOwnerEmbedding(req.toko_id, req.pengguna?.id, req.body || {});
+    return ok(reply, data, 'Prototipe visual embedding toko berhasil disimpan', 201);
   });
 }

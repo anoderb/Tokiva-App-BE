@@ -3,7 +3,9 @@ import path from 'node:path';
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { config } from '../../config/env.js';
 import {
+  getTrackConfig,
   KERNEL_OUTPUT_DIR,
+  KERNEL_OUTPUT_DIR_V2,
   LEGACY_KERNEL_OUTPUT_DIR,
   STORAGE_BUCKET,
   EXPERIMENT_NAME_MAP,
@@ -13,6 +15,7 @@ import {
 } from './kaggle-config.js';
 import { downloadKernelOutputIfNeeded } from './kaggle-cli.js';
 import { uploadResearchBundleToCloud } from './kaggle-research-cloud.js';
+import { promoteTrainedEmbeddings } from './embedding.js';
 
 async function uploadToStorage(versi, filename, localPath, contentType = 'application/octet-stream') {
   const fileBuffer = fs.readFileSync(localPath);
@@ -26,18 +29,21 @@ async function uploadToStorage(versi, filename, localPath, contentType = 'applic
   return data.publicUrl;
 }
 
-async function buildNextModelVersion(now = new Date()) {
+async function buildNextModelVersion(track = 'v1', now = new Date()) {
+  const { versionPrefix } = getTrackConfig(track);
   const { data: existing } = await supabaseAdmin
     .from('ai_model')
     .select('versi')
+    .ilike('versi', `${versionPrefix}.%`)
     .order('tgl_rilis', { ascending: false })
     .limit(100);
   const count = (existing || []).length + 1;
-  return `v1.${count}.${formatTimestamp(now, false)}`;
+  return `${versionPrefix}.${count}.${formatTimestamp(now, false)}`;
 }
 
-export async function downloadAndRegister(customVersi = null, runId = null) {
-  const { modelJsonLocal, searchRoot } = await downloadKernelOutputIfNeeded(runId, Boolean(runId));
+export async function downloadAndRegister(customVersi = null, runId = null, track = 'v1') {
+  const trackCfg = getTrackConfig(track);
+  const { modelJsonLocal, searchRoot } = await downloadKernelOutputIfNeeded(runId, Boolean(runId), trackCfg.track);
   try {
     if (!modelJsonLocal) {
       return { model_registered: false, message: 'model.json tidak ditemukan di output Kaggle.' };
@@ -52,18 +58,37 @@ export async function downloadAndRegister(customVersi = null, runId = null) {
     }));
 
     const classJsonLocal = findArtifact(searchRoot, 'class.json', 'FINAL_MODEL');
+    const centroidsJsonLocal = findArtifact(searchRoot, 'class_centroids.json', 'FINAL_MODEL');
+    const embMetaJsonLocal = findArtifact(searchRoot, 'embedding_meta.json', 'FINAL_MODEL');
     const summaryLocal = findArtifact(searchRoot, 'training_summary.json', 'FINAL_MODEL');
     let trainingSummary = {};
     if (summaryLocal && fs.existsSync(summaryLocal)) {
       try {
         trainingSummary = JSON.parse(fs.readFileSync(summaryLocal, 'utf-8'));
-      } catch {}
+      } catch { }
     }
 
+    let embMeta = {};
+    if (embMetaJsonLocal && fs.existsSync(embMetaJsonLocal)) {
+      try {
+        embMeta = JSON.parse(fs.readFileSync(embMetaJsonLocal, 'utf-8'));
+      } catch { }
+    }
+
+    const isV2 =
+      trackCfg.track === 'v2' ||
+      trainingSummary.model_family === 'v2' ||
+      Boolean(trainingSummary.mendukung_embedding) ||
+      Boolean(centroidsJsonLocal) ||
+      Boolean(embMeta.mendukung_embedding);
+    const modelFamily = isV2 ? 'v2' : 'v1';
+
     const bestExp = trainingSummary.best_experiment || 'E1_MobileNetV3';
-    const versiClean = customVersi || (await buildNextModelVersion());
-    const modelName = EXPERIMENT_NAME_MAP[bestExp] || `Tokiva ${bestExp}`;
-    const arsitektur = bestExp.includes('CBAM') ? 'MobileNetV3-Large + CBAM' : 'MobileNetV3-Large';
+    const versiClean = customVersi || (await buildNextModelVersion(modelFamily));
+    const baseName = EXPERIMENT_NAME_MAP[bestExp] || `Tokiva ${bestExp}`;
+    const modelName = isV2 && !baseName.toLowerCase().includes('v2') ? `${baseName} (v2 Hybrid)` : baseName;
+    const baseArch = bestExp.includes('CBAM') ? 'MobileNetV3-Large + CBAM' : 'MobileNetV3-Large';
+    const arsitektur = isV2 ? `${baseArch} + Embed` : baseArch;
 
     const modelJsonUrl = await uploadToStorage(versiClean, 'model.json', modelJsonLocal, 'application/json');
     const shardsUploaded = [];
@@ -74,9 +99,25 @@ export async function downloadAndRegister(customVersi = null, runId = null) {
     }
 
     let classJsonUrl = `${config.supabase.url}/storage/v1/object/public/${STORAGE_BUCKET}/${versiClean}/class.json`;
+    let classLabels = [];
     if (classJsonLocal && fs.existsSync(classJsonLocal)) {
       classJsonUrl = await uploadToStorage(versiClean, 'class.json', classJsonLocal, 'application/json');
+      try {
+        const parsedClass = JSON.parse(fs.readFileSync(classJsonLocal, 'utf-8'));
+        classLabels = Array.isArray(parsedClass) ? parsedClass : Object.values(parsedClass || {});
+      } catch { }
     }
+
+    let centroidsUrl = null;
+    if (centroidsJsonLocal && fs.existsSync(centroidsJsonLocal)) {
+      centroidsUrl = await uploadToStorage(versiClean, 'class_centroids.json', centroidsJsonLocal, 'application/json');
+    }
+
+    let embMetaUrl = null;
+    if (embMetaJsonLocal && fs.existsSync(embMetaJsonLocal)) {
+      embMetaUrl = await uploadToStorage(versiClean, 'embedding_meta.json', embMetaJsonLocal, 'application/json');
+    }
+
     if (summaryLocal && fs.existsSync(summaryLocal)) {
       await uploadToStorage(versiClean, 'training_summary.json', summaryLocal, 'application/json');
     }
@@ -86,7 +127,7 @@ export async function downloadAndRegister(customVersi = null, runId = null) {
       : searchRoot;
     const cloudResearch = await uploadResearchBundleToCloud(researchRoot, {
       runId: runId || versiClean,
-      label: versiClean,
+      label: isV2 ? `${versiClean} (v2 Hybrid)` : versiClean,
     }).catch((err) => {
       console.warn('Gagal mengunggah bundle riset ke Supabase Storage:', err.message);
       return null;
@@ -98,11 +139,19 @@ export async function downloadAndRegister(customVersi = null, runId = null) {
       ...(classJsonLocal && fs.existsSync(classJsonLocal) ? [classJsonLocal] : []),
     ];
     const sizeMb = Number((allFiles.reduce((acc, f) => acc + fs.statSync(f).size, 0) / (1024 * 1024)).toFixed(2));
+    const dimensiEmbedding = isV2
+      ? Number(embMeta.dimensi_embedding || trainingSummary.dimensi_embedding || 256)
+      : null;
 
     const payload = {
       versi: versiClean,
       nama_model: modelName,
       arsitektur,
+      model_family: modelFamily,
+      mendukung_embedding: isV2,
+      dimensi_embedding: dimensiEmbedding,
+      path_centroids: centroidsUrl,
+      path_embedding_meta: embMetaUrl,
       path_model_json: modelJsonUrl,
       path_bobot_bin: shardsUploaded.join(','),
       path_label: classJsonUrl,
@@ -128,12 +177,20 @@ export async function downloadAndRegister(customVersi = null, runId = null) {
       savedModel = data;
     }
 
+    if (isV2 && classLabels.length > 0) {
+      await promoteTrainedEmbeddings(savedModel.versi, classLabels);
+    }
+
     return {
       model_registered: true,
+      track: modelFamily,
       model_id: savedModel.id,
       versi: savedModel.versi,
       nama_model: savedModel.nama_model,
       arsitektur: savedModel.arsitektur,
+      model_family: savedModel.model_family,
+      mendukung_embedding: savedModel.mendukung_embedding,
+      dimensi_embedding: savedModel.dimensi_embedding,
       akurasi: savedModel.akurasi_top1,
       f1_macro: savedModel.f1_score,
       num_classes: savedModel.jml_kelas,
@@ -219,7 +276,7 @@ export function listResearchRuns() {
     if (fs.existsSync(sumPath)) {
       try {
         meta = JSON.parse(fs.readFileSync(sumPath, 'utf-8'));
-      } catch {}
+      } catch { }
     }
 
     const stat = fs.statSync(fs.existsSync(compPath) ? compPath : sumPath);
@@ -238,40 +295,40 @@ export function listResearchRuns() {
     });
   };
 
-  for (const outputRoot of [KERNEL_OUTPUT_DIR, LEGACY_KERNEL_OUTPUT_DIR]) {
-    if (!fs.existsSync(outputRoot)) continue;
-    for (const ent of fs.readdirSync(outputRoot, { withFileTypes: true })) {
-      if (!ent.isDirectory() || ent.name === 'Research_POS') continue;
-      if (!runs.some((r) => r.run_id === ent.name)) {
-        collectRun(ent.name, path.join(outputRoot, ent.name, 'Research_POS'), ent.name);
+    for (const outputRoot of [KERNEL_OUTPUT_DIR, KERNEL_OUTPUT_DIR_V2, LEGACY_KERNEL_OUTPUT_DIR]) {
+      if (!fs.existsSync(outputRoot)) continue;
+      for (const ent of fs.readdirSync(outputRoot, { withFileTypes: true })) {
+        if (!ent.isDirectory() || ent.name === 'Research_POS') continue;
+        if (!runs.some((r) => r.run_id === ent.name)) {
+          collectRun(ent.name, path.join(outputRoot, ent.name, 'Research_POS'), ent.name);
+        }
+      }
+      if (!runs.some((r) => r.run_id === 'default')) {
+        collectRun('default', path.join(outputRoot, 'Research_POS'), 'Baseline Riset (Research_POS)');
       }
     }
-    if (!runs.some((r) => r.run_id === 'default')) {
-      collectRun('default', path.join(outputRoot, 'Research_POS'), 'Baseline Riset (Research_POS)');
+
+    runs.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return runs;
+  }
+
+  export function resolveResearchDir(runId = null) {
+    const runs = listResearchRuns();
+    if (runId) {
+      const matched = runs.find((r) => r.run_id === runId);
+      if (matched) return matched;
     }
+    if (runs.length > 0) return runs[0];
+    const fallbackDir = fs.existsSync(path.join(KERNEL_OUTPUT_DIR, 'Research_POS'))
+      ? path.join(KERNEL_OUTPUT_DIR, 'Research_POS')
+      : path.join(LEGACY_KERNEL_OUTPUT_DIR, 'Research_POS');
+    return {
+      run_id: 'default',
+      label: 'Baseline Riset (Research_POS)',
+      dir: fallbackDir,
+      mtimeMs: 0,
+      generated_at: null,
+      num_classes: null,
+      best_experiment: null,
+    };
   }
-
-  runs.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return runs;
-}
-
-export function resolveResearchDir(runId = null) {
-  const runs = listResearchRuns();
-  if (runId) {
-    const matched = runs.find((r) => r.run_id === runId);
-    if (matched) return matched;
-  }
-  if (runs.length > 0) return runs[0];
-  const fallbackDir = fs.existsSync(path.join(KERNEL_OUTPUT_DIR, 'Research_POS'))
-    ? path.join(KERNEL_OUTPUT_DIR, 'Research_POS')
-    : path.join(LEGACY_KERNEL_OUTPUT_DIR, 'Research_POS');
-  return {
-    run_id: 'default',
-    label: 'Baseline Riset (Research_POS)',
-    dir: fallbackDir,
-    mtimeMs: 0,
-    generated_at: null,
-    num_classes: null,
-    best_experiment: null,
-  };
-}

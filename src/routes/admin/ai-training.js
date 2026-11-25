@@ -19,17 +19,18 @@ import { ok } from '../../utils/response.js';
 /** Route admin pipeline training Kaggle, riset eksperimen, dan penjadwal cron AI */
 export default async function adminAiTrainingRoutes(app) {
   app.post('/ai/train', { schema: aiSchema.triggerTrain }, async (req, reply) => {
-    const data = await kaggleService.triggerTraining(req.pengguna);
-    ensureTrainingPollerRunning();
-    return ok(reply, data, 'Training berhasil di-trigger di Kaggle GPU T4x2');
+    const track = req.body?.track || req.query?.track || 'v1';
+    const data = await kaggleService.triggerTraining(req.pengguna, track);
+    ensureTrainingPollerRunning(track);
+    return ok(reply, data, `Training (${data.track || track}) berhasil di-trigger di Kaggle GPU T4x2`);
   });
 
   app.get('/ai/train/status', { schema: aiSchema.trainStatus }, async (req, reply) => {
-    return ok(reply, await kaggleService.getStatus(req.query?.id));
+    return ok(reply, await kaggleService.getStatus(req.query?.id, req.query?.track || 'v1'));
   });
 
   app.get('/ai/kaggle/status', { schema: aiSchema.trainStatus }, async (req, reply) => {
-    return ok(reply, await kaggleService.getStatus(req.query?.id));
+    return ok(reply, await kaggleService.getStatus(req.query?.id, req.query?.track || 'v1'));
   });
 
   app.get('/ai/train/history', { schema: aiSchema.trainHistory }, async (req, reply) => {
@@ -37,12 +38,14 @@ export default async function adminAiTrainingRoutes(app) {
   });
 
   app.post('/ai/train/reset', { schema: aiSchema.trainReset }, async (req, reply) => {
-    return ok(reply, await kaggleService.resetTraining(), 'Status training berhasil direset');
+    const track = req.body?.track || req.query?.track || 'v1';
+    return ok(reply, await kaggleService.resetTraining(track), `Status training (${track}) berhasil direset`);
   });
 
   app.post('/ai/train/fetch-output', { schema: aiSchema.fetchOutput }, async (req, reply) => {
-    const data = await kaggleService.fetchAndRegisterKaggleOutput(req.body?.versi);
-    return ok(reply, data, 'Model terbaru berhasil ditarik dari output Kaggle dan didaftarkan');
+    const track = req.body?.track || req.query?.track || 'v1';
+    const data = await kaggleService.fetchAndRegisterKaggleOutput(req.body?.versi, track);
+    return ok(reply, data, `Model terbaru (${track}) berhasil ditarik dari output Kaggle dan didaftarkan`);
   });
 
   app.get('/ai/research-summary', { schema: aiSchema.researchSummary }, async (req, reply) => {

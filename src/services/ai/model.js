@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../../lib/supabase.js';
 import { config } from '../../config/env.js';
 import { NotFound, Conflict } from '../../utils/errors.js';
 import { kaggleService } from './kaggle.js';
+import { promoteTrainedEmbeddings } from './embedding.js';
 import {
   getThresholdConfig,
   initThresholdConfigFromCloud,
@@ -174,5 +175,22 @@ export async function activateModel(versiOrId, versiOverride = null) {
     .single();
 
   if (updateErr) throw updateErr;
+
+  if (updated?.mendukung_embedding || updated?.model_family === 'v2') {
+    try {
+      const classUrl =
+        updated.path_label ||
+        `${config.supabase.url}/storage/v1/object/public/ai-models/${updated.versi}/class.json`;
+      const clsRes = await fetch(classUrl);
+      if (clsRes.ok) {
+        const parsed = await clsRes.json();
+        const trainedLabels = Array.isArray(parsed) ? parsed : Object.values(parsed || {});
+        await promoteTrainedEmbeddings(updated.versi, trainedLabels);
+      }
+    } catch {
+      // promotion is non-blocking
+    }
+  }
+
   return updated;
 }

@@ -29,6 +29,7 @@ export const DEFAULT_AUTOMATION_CONFIG = {
   training: {
     enabled: false,
     mode: 'on_new_dataset', // 'daily' | 'interval' | 'on_new_dataset'
+    target_track: 'v1', // 'v1' | 'v2'
     hour: 2,
     minute: 0,
     interval_hours: 24,
@@ -81,6 +82,7 @@ export function normalizeConfig(raw = {}) {
     mode: ['daily', 'interval', 'on_new_dataset'].includes(trSrc.mode)
       ? trSrc.mode
       : base.training.mode,
+    target_track: String(trSrc.target_track || base.training.target_track).toLowerCase() === 'v2' ? 'v2' : 'v1',
     hour: clampInt(trSrc.hour, base.training.hour, 0, 23),
     minute: clampInt(trSrc.minute, base.training.minute, 0, 59),
     interval_hours: clampInt(trSrc.interval_hours, base.training.interval_hours, 1, 24),

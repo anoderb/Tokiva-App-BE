@@ -10,11 +10,25 @@ export async function syncStorageModel(versi = 'v1.2.20260912', setAktif = false
   const modelJsonUrl = `${publicBase}/model.json`;
   const classJsonUrl = `${publicBase}/class.json`;
   const summaryJsonUrl = `${publicBase}/training_summary.json`;
+  const embMetaUrl = `${publicBase}/embedding_meta.json`;
+  const centroidsUrl = `${publicBase}/class_centroids.json`;
 
   let summary = {};
   try {
     const sumRes = await fetch(summaryJsonUrl);
     if (sumRes.ok) summary = await sumRes.json();
+  } catch { }
+
+  let embMeta = null;
+  try {
+    const embRes = await fetch(embMetaUrl);
+    if (embRes.ok) embMeta = await embRes.json();
+  } catch { }
+
+  let hasCentroids = false;
+  try {
+    const centRes = await fetch(centroidsUrl, { method: 'HEAD' });
+    hasCentroids = centRes.ok;
   } catch { }
 
   let classCount = 24;
@@ -23,10 +37,24 @@ export async function syncStorageModel(versi = 'v1.2.20260912', setAktif = false
     if (clsRes.ok) classCount = Object.keys(await clsRes.json()).length;
   } catch { }
 
+  const isV2 =
+    String(versi).toLowerCase().startsWith('v2.') ||
+    summary.model_family === 'v2' ||
+    Boolean(summary.mendukung_embedding) ||
+    Boolean(embMeta?.mendukung_embedding) ||
+    hasCentroids;
+
   const modelPayload = {
     versi,
-    nama_model: summary.best_experiment ? `Tokiva ${summary.best_experiment}` : `Tokiva MobileNetV3 ${versi}`,
+    nama_model: summary.best_experiment
+      ? `Tokiva ${isV2 ? 'v2 ' : ''}${summary.best_experiment}`
+      : `Tokiva MobileNetV3 ${versi}`,
     arsitektur: summary.best_experiment ? summary.best_experiment.replace(/^E\d+_/, '') : 'MobileNetV3-Large',
+    model_family: isV2 ? 'v2' : 'v1',
+    mendukung_embedding: isV2,
+    dimensi_embedding: isV2 ? Number(embMeta?.dimensi_embedding || summary.dimensi_embedding || 256) : null,
+    path_centroids: hasCentroids ? centroidsUrl : null,
+    path_embedding_meta: embMeta ? embMetaUrl : null,
     path_model_json: modelJsonUrl,
     path_bobot_bin: `${publicBase}/group1-shard1of3.bin,${publicBase}/group1-shard2of3.bin,${publicBase}/group1-shard3of3.bin`,
     path_label: classJsonUrl,
@@ -70,6 +98,11 @@ export async function registerManualModel(payload = {}) {
     path_model_json,
     path_bobot_bin,
     path_label,
+    model_family,
+    mendukung_embedding,
+    dimensi_embedding,
+    path_centroids,
+    path_embedding_meta,
     setAktif = false,
     aktif = false,
   } = payload;
@@ -81,11 +114,20 @@ export async function registerManualModel(payload = {}) {
   const shouldActivate = Boolean(setAktif || aktif);
   const versiClean = String(versi).trim();
   const publicBase = `${config.supabase.url}/storage/v1/object/public/ai-models/${versiClean}`;
+  const isV2 =
+    String(model_family || '').toLowerCase() === 'v2' ||
+    Boolean(mendukung_embedding) ||
+    versiClean.toLowerCase().startsWith('v2.');
 
   const insertPayload = {
     versi: versiClean,
     nama_model: nama_model || `Tokiva ${arsitektur} (${versiClean})`,
     arsitektur,
+    model_family: isV2 ? 'v2' : 'v1',
+    mendukung_embedding: isV2,
+    dimensi_embedding: isV2 ? Number(dimensi_embedding) || 256 : null,
+    path_centroids: path_centroids || (isV2 ? `${publicBase}/class_centroids.json` : null),
+    path_embedding_meta: path_embedding_meta || (isV2 ? `${publicBase}/embedding_meta.json` : null),
     path_model_json: path_model_json || `${publicBase}/model.json`,
     path_bobot_bin: path_bobot_bin || `${publicBase}/group1-shard1of3.bin`,
     path_label: path_label || `${publicBase}/class.json`,

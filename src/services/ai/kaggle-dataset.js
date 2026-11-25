@@ -6,7 +6,11 @@ import {
   SYNC_KERNEL_SLUG,
   SYNC_KAGGLE_URL,
   KERNEL_ID,
+  KERNEL_SLUG,
   KAGGLE_URL,
+  KERNEL_ID_V2,
+  KERNEL_SLUG_V2,
+  KAGGLE_URL_V2,
   DATASET_ID,
   DATASET_KAGGLE_URL,
   readSyncState,
@@ -28,7 +32,11 @@ export function getDatasetInfo() {
     sync_kernel_id: SYNC_KERNEL_ID,
     sync_kaggle_url: SYNC_KAGGLE_URL,
     train_kernel_id: KERNEL_ID,
+    train_kernel_slug: KERNEL_SLUG,
     train_kaggle_url: KAGGLE_URL,
+    train_kernel_id_v2: KERNEL_ID_V2,
+    train_kernel_slug_v2: KERNEL_SLUG_V2,
+    train_kaggle_url_v2: KAGGLE_URL_V2,
     hf_repo: config.huggingFace.datasetRepo || '',
   };
 }

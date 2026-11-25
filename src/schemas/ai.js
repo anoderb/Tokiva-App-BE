@@ -160,6 +160,7 @@ export const aiSchema = {
         produk_id_asli: { type: 'string' },
         butuh_koreksi: { type: 'boolean', default: false },
         foto_cuplikan: { type: 'string' },
+        metode_deteksi: { type: 'string', enum: ['softmax', 'embedding'], default: 'softmax' },
       },
       additionalProperties: true,
     },

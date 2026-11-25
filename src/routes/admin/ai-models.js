@@ -8,6 +8,11 @@ import {
   getThresholdConfig,
   updateThresholdConfig,
 } from '../../services/ai/model.js';
+import {
+  listAdminEmbeddings,
+  updateAdminEmbeddingStatus,
+  deleteAdminEmbedding,
+} from '../../services/ai/embedding.js';
 import { aiSchema } from '../../schemas/ai.js';
 import { ok } from '../../utils/response.js';
 
@@ -49,5 +54,20 @@ export default async function adminAiModelRoutes(app) {
   app.put('/ai/threshold', { schema: aiSchema.updateThreshold }, async (req, reply) => {
     const data = await updateThresholdConfig(req.body || {});
     return ok(reply, data, 'Konfigurasi threshold identifikasi kasir berhasil disimpan');
+  });
+
+  // Monitor & Kelola Embedding Sementara Lintas Toko (Model v2 Hybrid)
+  app.get('/ai/embeddings', { schema: aiSchema.listAdminEmbeddings }, async (req, reply) => {
+    return ok(reply, await listAdminEmbeddings(req.query || {}));
+  });
+
+  app.patch('/ai/embeddings/:id/status', { schema: aiSchema.updateEmbeddingStatus }, async (req, reply) => {
+    const data = await updateAdminEmbeddingStatus(req.params.id, req.body?.status);
+    return ok(reply, data, `Status embedding berhasil diubah ke '${data.status}'`);
+  });
+
+  app.delete('/ai/embeddings/:id', { schema: aiSchema.deleteById }, async (req, reply) => {
+    const data = await deleteAdminEmbedding(req.params.id);
+    return ok(reply, data, 'Embedding produk berhasil dihapus');
   });
 }

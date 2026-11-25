@@ -2,6 +2,7 @@ import { getModelAktif } from '../../services/ai/model.js';
 import { listKelasAI } from '../../services/ai/kelas.js';
 import { catatLogInferensi } from '../../services/ai/inferensi.js';
 import { uploadBurstSampel } from '../../services/ai/sampel.js';
+import { listStoreActiveEmbeddings } from '../../services/ai/embedding.js';
 import { aiSchema } from '../../schemas/ai.js';
 import { ok } from '../../utils/response.js';
 
@@ -24,7 +25,7 @@ export default async function kasirAiRoutes(app) {
     return ok(reply, data, 'Log inferensi berhasil dicatat', 201);
   });
 
-  // 3. Kasir Bantu Ambil Burst Foto Produk Baru di Meja Kasir (selalu menunggu validasi Admin)
+  // 4. Kasir Bantu Ambil Burst Foto Produk Baru di Meja Kasir (selalu menunggu validasi Admin)
   app.post('/ai/sampel/burst', { schema: aiSchema.uploadBurst }, async (req, reply) => {
     const data = await uploadBurstSampel({
       ...req.body,
@@ -32,5 +33,10 @@ export default async function kasirAiRoutes(app) {
     });
     return ok(reply, data, 'Burst sampel foto berhasil diunggah', 201);
   });
-}
 
+  // 5. Ambil Embedding Sementara Aktif Milik Toko Ini (Model v2 Hybrid)
+  app.get('/ai/embeddings', { schema: aiSchema.listStoreEmbeddings }, async (req, reply) => {
+    const data = await listStoreActiveEmbeddings(req.toko_id, req.query?.model_versi || null);
+    return ok(reply, data);
+  });
+}

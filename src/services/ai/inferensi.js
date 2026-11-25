@@ -16,10 +16,13 @@ export async function catatLogInferensi(tokoId, kasirId, payload) {
     produk_id_asli = null,
     butuh_koreksi = false,
     foto_cuplikan = null,
+    metode_deteksi = 'softmax',
   } = payload;
 
   if (!tokoId) throw new BadRequest('Konteks toko wajib dimiliki untuk mencatat log inferensi');
   if (!prediksi_kelas_id) throw new BadRequest('ID kelas prediksi AI wajib diisi');
+
+  const safeMetodeDeteksi = String(metode_deteksi || '').toLowerCase() === 'embedding' ? 'embedding' : 'softmax';
 
   let normalizedSkor = Number(skor_yakin) || 0;
   if (normalizedSkor > 1) normalizedSkor /= 100;
@@ -67,6 +70,7 @@ export async function catatLogInferensi(tokoId, kasirId, payload) {
       produk_id_asli: produk_id_asli || null,
       butuh_koreksi: Boolean(butuh_koreksi || !diterima_kasir),
       foto_cuplikan: savedFotoPath,
+      metode_deteksi: safeMetodeDeteksi,
       waktu: new Date().toISOString(),
     })
     .select('*, kelas:prediksi_kelas_id(id, kode_kelas, nama)')
