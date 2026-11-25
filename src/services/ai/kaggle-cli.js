@@ -233,10 +233,7 @@ export async function downloadKernelOutputIfNeeded(runId = null, forceRemote = f
 
   const authHeader = `Basic ${getKaggleBasicAuth()}`;
   try {
-    const url = `https://www.kaggle.com/api/v1/kernels/output?userName=${encodeURIComponent(
-      config.kaggle.username
-        )
-  }& kernelSlug=${ encodeURIComponent(trackCfg.kernelSlug) } `;
+    const url = `https://www.kaggle.com/api/v1/kernels/output?userName=${encodeURIComponent(config.kaggle.username)}&kernelSlug=${encodeURIComponent(trackCfg.kernelSlug)}`;
             const res = await fetch(url, { headers: { Authorization: authHeader } });
             if (res.ok) {
               const data = await res.json();
@@ -267,11 +264,9 @@ export async function downloadKernelOutputIfNeeded(runId = null, forceRemote = f
         }
 
         export async function downloadSyncSummary(_syncId = 'latest') {
-          const authHeader = `Basic ${ getKaggleBasicAuth() } `;
+          const authHeader = `Basic ${getKaggleBasicAuth()}`;
           try {
-            const url = `https://www.kaggle.com/api/v1/kernels/output?userName=${encodeURIComponent(
-              config.kaggle.username
-            )}&kernelSlug=${encodeURIComponent(SYNC_KERNEL_SLUG)}`;
+            const url = `https://www.kaggle.com/api/v1/kernels/output?userName=${encodeURIComponent(config.kaggle.username)}&kernelSlug=${encodeURIComponent(SYNC_KERNEL_SLUG)}`;
 const res = await fetch(url, { headers: { Authorization: authHeader } });
 if (!res.ok) return null;
 
