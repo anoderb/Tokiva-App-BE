@@ -31,8 +31,8 @@ const execFileAsync = promisify(execFile);
  * Sisipkan konfigurasi non-rahasia saja ke notebook; kredensial sensitif (HF_TOKEN, KAGGLE_KEY)
  * dibaca langsung dari Kaggle Secrets (kaggle_secrets.UserSecretsClient) di runner Kaggle.
  */
-function injectNotebookNonSecretConfig(notebookPath, replacements = {}) {
-  const forbiddenKeys = new Set(['HF_TOKEN', 'KAGGLE_KEY', 'KAGGLE_USERNAME']);
+export function injectNotebookNonSecretConfig(notebookPath, replacements = {}) {
+  const forbiddenKeys = new Set(['HF_TOKEN', 'KAGGLE_KEY']);
   const nb = JSON.parse(fs.readFileSync(notebookPath, 'utf-8'));
   for (const cell of nb.cells || []) {
     let src = (cell.source || []).join('');
@@ -57,6 +57,7 @@ function injectNotebookNonSecretConfig(notebookPath, replacements = {}) {
     try {
       injectNotebookNonSecretConfig(nbDest, {
         HF_REPO_ID: config.huggingFace.datasetRepo || '',
+        KAGGLE_USERNAME: config.kaggle.username || '',
         KAGGLE_DATASET_SLUG: DATASET_SLUG,
       });
     } catch (err) {
@@ -93,36 +94,29 @@ function injectNotebookNonSecretConfig(notebookPath, replacements = {}) {
       formatRestStdout,
     }) {
       const authHeader = `Basic ${getKaggleBasicAuth()}`;
+      let restRejection = null;
       try {
         try {
           const res = await fetch('https://www.kaggle.com/api/v1/kernels/push', {
             method: 'POST',
             headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              slug: kernelId,
-              newTitle: kernelSlug,
-              text: notebookText,
-              language: 'python',
-              kernelType: 'notebook',
-              isPrivate: true,
-              enableGpu: Boolean(enableGpu),
-              enableTpu: false,
-              enableInternet: true,
+              slug: kernelId, newTitle: kernelSlug, text: notebookText,
+              language: 'python', kernelType: 'notebook', isPrivate: true,
+              enableGpu: Boolean(enableGpu), enableTpu: false, enableInternet: true,
               datasetDataSources: attachDataset ? [DATASET_ID] : [],
-              competitionDataSources: [],
-              kernelDataSources: [],
+              competitionDataSources: [], kernelDataSources: [],
             }),
           });
           if (res.ok) {
             const json = await res.json();
-            return {
-              stdout: formatRestStdout(json),
-              url: normalizeKaggleUrl(json.url, defaultUrl),
-            };
+            if (json?.error) restRejection = new Error(`Kaggle menolak push kernel (${kernelSlug}): ${json.error}`);
+            else return { stdout: formatRestStdout(json), url: normalizeKaggleUrl(json.url, defaultUrl) };
           }
         } catch (apiErr) {
           console.warn(`Kaggle REST push fallback ke CLI (${kernelSlug}):`, apiErr.message);
         }
+        if (restRejection) throw restRejection;
 
         const env = { ...process.env, KAGGLE_USERNAME: config.kaggle.username, KAGGLE_KEY: config.kaggle.key };
         const { stdout } = await execFileAsync('python', ['-m', 'kaggle', 'kernels', 'push', '-p', pushDir], {

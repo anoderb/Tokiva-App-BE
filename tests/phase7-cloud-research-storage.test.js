@@ -12,6 +12,7 @@ const {
   KAGGLE_TEMP_ROOT,
   cleanupTempDir,
 } = await import('../src/services/ai/kaggle-config.js');
+const { injectNotebookNonSecretConfig } = await import('../src/services/ai/kaggle-cli.js');
 const {
   RESEARCH_INDEX_PATH,
   uploadResearchBundleToCloud,
@@ -125,5 +126,41 @@ describe('Phase 7 Cloud Research Storage & Stateless Temp Cleanup', () => {
     tempFixtures.push(outsideDir);
     assert.equal(cleanupTempDir(outsideDir), false);
     assert.equal(fs.existsSync(outsideDir), true);
+  });
+
+  it('injectNotebookNonSecretConfig injects KAGGLE_USERNAME and HF_REPO_ID while blocking secrets', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tokiva-nb-test-'));
+    tempFixtures.push(tmpDir);
+    const nbPath = path.join(tmpDir, 'sync.ipynb');
+    fs.writeFileSync(
+      nbPath,
+      JSON.stringify({
+        cells: [
+          {
+            cell_type: 'code',
+            source: [
+              'HF_REPO_ID = os.environ.get("HF_REPO_ID", "")\n',
+              'HF_TOKEN = os.environ.get("HF_TOKEN", "")\n',
+              'KAGGLE_USERNAME = os.environ.get("KAGGLE_USERNAME", "")\n',
+              'KAGGLE_KEY = os.environ.get("KAGGLE_KEY", "")\n',
+            ],
+          },
+        ],
+      })
+    );
+
+    injectNotebookNonSecretConfig(nbPath, {
+      HF_REPO_ID: 'org/repo',
+      HF_TOKEN: 'hf_secret_should_not_inject',
+      KAGGLE_USERNAME: 'myuser',
+      KAGGLE_KEY: 'kgat_secret_should_not_inject',
+    });
+
+    const out = JSON.parse(fs.readFileSync(nbPath, 'utf-8'));
+    const joined = out.cells[0].source.join('');
+    assert.ok(joined.includes('HF_REPO_ID = "org/repo"'));
+    assert.ok(joined.includes('KAGGLE_USERNAME = "myuser"'));
+    assert.ok(joined.includes('HF_TOKEN = os.environ.get("HF_TOKEN", "")'));
+    assert.ok(joined.includes('KAGGLE_KEY = os.environ.get("KAGGLE_KEY", "")'));
   });
 });
