@@ -22,6 +22,65 @@ export function buildHfSamplePath(kodeKelas, fileName) {
   return `data/${cleanKode}/${cleanFile}`;
 }
 
+export function extractHfFolderFromPath(hfPath) {
+  const match = String(hfPath || '')
+    .trim()
+    .replace(/^\/+/, '')
+    .match(/^(?:data|dataset)\/([^/]+)\//);
+  return match ? match[1] : null;
+}
+
+export function pickDominantHfFolder(hfPaths = [], fallbackKodeKelas = '') {
+  const counts = new Map();
+  for (const p of hfPaths) {
+    const folder = extractHfFolderFromPath(p);
+    if (!folder) continue;
+    counts.set(folder, (counts.get(folder) || 0) + 1);
+  }
+  const preferred = [...counts.entries()]
+    .filter(([folder]) => !/^CLS-\d+$/i.test(folder))
+    .sort((a, b) => b[1] - a[1]);
+  if (preferred.length > 0) return preferred[0][0];
+
+  const cleanFallback = String(fallbackKodeKelas || '').trim();
+  if (cleanFallback && !/^CLS-\d+$/i.test(cleanFallback)) {
+    return slugifyKodeKelas(cleanFallback) || cleanFallback;
+  }
+  return slugifyKodeKelas(cleanFallback) || 'umum';
+}
+
+/** Memetakan kelas_id ke nama folder Hugging Face kanonik (prioritas folder slug mayoritas). */
+export async function resolveCanonicalHfFoldersMap(kelasEntries = [], { dbClient = supabaseAdmin } = {}) {
+  const byId = new Map();
+  for (const entry of kelasEntries) {
+    if (entry?.id && !byId.has(entry.id)) {
+      byId.set(entry.id, entry.kode_kelas || '');
+    }
+  }
+  const result = new Map();
+  if (byId.size === 0) return result;
+
+  await Promise.all(
+    [...byId.entries()].map(async ([kId, fallbackKode]) => {
+      const { data: rows } = await dbClient
+        .from('ai_sampel')
+        .select('hf_path')
+        .eq('kelas_id', kId)
+        .not('hf_path', 'is', null)
+        .limit(50);
+      const folder = pickDominantHfFolder((rows || []).map((r) => r.hf_path), fallbackKode);
+      result.set(kId, folder);
+    })
+  );
+  return result;
+}
+
+export async function resolveCanonicalHfFolderForClass(kelasId, fallbackKodeKelas = '', options = {}) {
+  if (!kelasId) return pickDominantHfFolder([], fallbackKodeKelas);
+  const map = await resolveCanonicalHfFoldersMap([{ id: kelasId, kode_kelas: fallbackKodeKelas }], options);
+  return map.get(kelasId) || pickDominantHfFolder([], fallbackKodeKelas);
+}
+
 /**
  * Lindungi file pada folder inferensi-log/ di Supabase Storage agar pratinjau
  * audit ai_log_inferensi.foto_cuplikan tetap utuh setelah sinkronisasi/hapus sampel.

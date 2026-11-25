@@ -6,6 +6,7 @@ import {
   chunkArray,
   isProtectedStagingPath,
   recountKelasMetrics,
+  resolveCanonicalHfFoldersMap,
 } from './helpers.js';
 import {
   UPLOAD_CHUNK_SIZE,
@@ -65,6 +66,9 @@ export async function syncDatasetToHuggingFace({
     if (pendingSamples.length === 0) break;
 
     for (const chunk of chunkArray(pendingSamples, UPLOAD_CHUNK_SIZE)) {
+      const folderMap = await resolveCanonicalHfFoldersMap(
+        chunk.map((s) => ({ id: s.kelas_id, kode_kelas: s.kelas?.kode_kelas || 'umum' }))
+      );
       const operations = [];
       const validSamples = [];
 
@@ -81,8 +85,8 @@ export async function syncDatasetToHuggingFace({
           continue;
         }
 
-        const kodeKelas = s.kelas?.kode_kelas || 'umum';
-        const targetPath = buildHfSamplePath(kodeKelas, s.nama_file);
+        const targetFolder = folderMap.get(s.kelas_id) || s.kelas?.kode_kelas || 'umum';
+        const targetPath = buildHfSamplePath(targetFolder, s.nama_file);
 
         operations.push({ operation: 'addOrUpdate', path: targetPath, content: fileData });
         validSamples.push({

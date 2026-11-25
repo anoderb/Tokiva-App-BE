@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../../lib/supabase.js';
 import { NotFound, BadRequest } from '../../utils/errors.js';
 import {
   buildHfSamplePath,
+  extractHfFolderFromPath,
   isProtectedStagingPath,
   slugifyKodeKelas,
 } from './helpers.js';
@@ -126,13 +127,19 @@ export async function deleteKelasAI(id) {
   }
 
   const knownHfPaths = (samples || []).filter((r) => r.lokasi_simpan === 'huggingface' && r.hf_path).map((r) => r.hf_path);
-  const hfRes = await deleteClassFolderFromHuggingFace(cls.kode_kelas, knownHfPaths);
+  const targetFolders = [...new Set([cls.kode_kelas, ...knownHfPaths.map(extractHfFolderFromPath)].filter(Boolean))];
+  let totalHfDeleted = 0;
+  for (const folder of targetFolders) {
+    const folderPaths = knownHfPaths.filter((p) => extractHfFolderFromPath(p) === folder);
+    const hfRes = await deleteClassFolderFromHuggingFace(folder, folderPaths);
+    totalHfDeleted += hfRes?.deleted || 0;
+  }
 
   await supabaseAdmin.from('ai_sampel').delete().eq('kelas_id', id);
   const { error: delErr } = await supabaseAdmin.from('ai_kelas').delete().eq('id', id);
   if (delErr) throw delErr;
 
-  return { deleted: true, id: cls.id, nama: cls.nama, hf_deleted: hfRes?.deleted || 0 };
+  return { deleted: true, id: cls.id, nama: cls.nama, hf_deleted: totalHfDeleted };
 }
 
 /**

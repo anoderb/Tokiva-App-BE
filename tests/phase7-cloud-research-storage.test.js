@@ -14,6 +14,11 @@ const {
 } = await import('../src/services/ai/kaggle-config.js');
 const { injectNotebookNonSecretConfig } = await import('../src/services/ai/kaggle-cli.js');
 const {
+  extractHfFolderFromPath,
+  pickDominantHfFolder,
+  resolveCanonicalHfFolderForClass,
+} = await import('../src/services/ai/helpers.js');
+const {
   RESEARCH_INDEX_PATH,
   uploadResearchBundleToCloud,
   listCloudResearchRuns,
@@ -162,5 +167,50 @@ describe('Phase 7 Cloud Research Storage & Stateless Temp Cleanup', () => {
     assert.ok(joined.includes('KAGGLE_USERNAME = "myuser"'));
     assert.ok(joined.includes('HF_TOKEN = os.environ.get("HF_TOKEN", "")'));
     assert.ok(joined.includes('KAGGLE_KEY = os.environ.get("KAGGLE_KEY", "")'));
+  });
+
+  it('resolveCanonicalHfFolderForClass prefers existing slug folder over legacy CLS-xxx kode_kelas', async () => {
+    assert.equal(extractHfFolderFromPath('data/soffell-unggu-13lt/img_01.jpg'), 'soffell-unggu-13lt');
+    assert.equal(
+      pickDominantHfFolder(
+        [
+          'data/soffell-unggu-13lt/1.jpg',
+          'data/soffell-unggu-13lt/2.jpg',
+          'data/CLS-004/pos_log.jpg',
+        ],
+        'CLS-004'
+      ),
+      'soffell-unggu-13lt'
+    );
+
+    const mockDb = {
+      from() {
+        return {
+          select() { return this; },
+          eq(_col, val) { this.val = val; return this; },
+          not() { return this; },
+          async limit() {
+            if (this.val === 'k-legacy') {
+              return {
+                data: [
+                  { hf_path: 'data/soffell-kuning13lt/a.jpg' },
+                  { hf_path: 'data/CLS-025/b.jpg' },
+                ],
+              };
+            }
+            return { data: [] };
+          },
+        };
+      },
+    };
+
+    assert.equal(
+      await resolveCanonicalHfFolderForClass('k-legacy', 'CLS-025', { dbClient: mockDb }),
+      'soffell-kuning13lt'
+    );
+    assert.equal(
+      await resolveCanonicalHfFolderForClass('k-new', 'Produk Baru 123', { dbClient: mockDb }),
+      'produk-baru-123'
+    );
   });
 });

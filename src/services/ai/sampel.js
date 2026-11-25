@@ -5,6 +5,7 @@ import {
   buildHfSamplePath,
   isProtectedStagingPath,
   recountKelasMetrics,
+  resolveCanonicalHfFolderForClass,
 } from './helpers.js';
 import {
   deleteFilesFromHuggingFace,
@@ -171,12 +172,13 @@ export async function ubahKelasSampel({ sampel_ids = [], kelas_id } = {}) {
     .in('id', sampel_ids);
   if (fErr) throw fErr;
 
+  const targetFolder = await resolveCanonicalHfFolderForClass(targetKelas.id, targetKelas.kode_kelas);
   const affectedKelas = new Set([kelas_id, ...(currentRows || []).map((r) => r.kelas_id).filter(Boolean)]);
   const hfMoves = (currentRows || [])
     .filter((r) => r.lokasi_simpan === 'huggingface' && r.hf_path && r.kelas_id !== kelas_id)
-    .map((r) => ({ id: r.id, oldPath: r.hf_path, newPath: buildHfSamplePath(targetKelas.kode_kelas, r.nama_file) }));
+    .map((r) => ({ id: r.id, oldPath: r.hf_path, newPath: buildHfSamplePath(targetFolder, r.nama_file) }));
 
-  const moveRes = await moveFilesInHuggingFace(hfMoves, `Tokiva Move Samples to ${targetKelas.kode_kelas}`);
+  const moveRes = await moveFilesInHuggingFace(hfMoves, `Tokiva Move Samples to ${targetFolder}`);
   const nowIso = new Date().toISOString();
   const movedIdSet = new Set();
   const updatedItems = [];
